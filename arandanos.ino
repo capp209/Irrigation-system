@@ -1,3 +1,4 @@
+
 // CONNECTIONS:
 // DS1302 CLK/SCLK --> 5
 // DS1302 DAT/IO --> 4
@@ -5,10 +6,14 @@
 // DS1302 VCC --> 3.3v - 5v
 // DS1302 GND --> GND
 
+//#include <LedControl.h>
+
 #include <RtcDS1302.h>
 
 ThreeWire myWire(4,5,2); // IO, SCLK, CE
+
 RtcDS1302<ThreeWire> Rtc(myWire);
+
 const int ledPin = 13;  // Pin del LED
 
 void setup (){
@@ -24,26 +29,29 @@ void setup (){
     Rtc.Begin();
 
     RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
+    Rtc.SetDateTime(compiled);
     printDateTime(compiled);
     Serial.println();
+    //RtcDateTime newDateTime(2023, 8, 24, 18, 25, 0);  // Nueva fecha y hora
+    //Rtc.SetDateTime(newDateTime);
 
-    if (!Rtc.IsDateTimeValid()){
+      if (!Rtc.IsDateTimeValid()){
+          
+          Serial.println("RTC lost confidence in the DateTime!");
+          Rtc.SetDateTime(compiled);
+          }
+  
+      if (Rtc.GetIsWriteProtected()){
         
-        Serial.println("RTC lost confidence in the DateTime!");
-        Rtc.SetDateTime(compiled);
-        }
-
-    if (Rtc.GetIsWriteProtected()){
-      
-        Serial.println("RTC was write protected, enabling writing now");
-        Rtc.SetIsWriteProtected(false);
-        }
-
-    if (!Rtc.GetIsRunning()){
-      
-        Serial.println("RTC was not actively running, starting now");
-        Rtc.SetIsRunning(true);
-        }
+          Serial.println("RTC was write protected, enabling writing now");
+          Rtc.SetIsWriteProtected(false);
+          }
+  
+      if (!Rtc.GetIsRunning()){
+        
+          Serial.println("RTC was not actively running, starting now");
+          Rtc.SetIsRunning(true);
+          }
 
     RtcDateTime now = Rtc.GetDateTime();
     
