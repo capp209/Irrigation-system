@@ -5,6 +5,7 @@ ThreeWire myWire(4,5,3); // IO, SCLK, CE
 
 RtcDS1302<ThreeWire> Rtc(myWire);
 RtcDateTime now;
+RtcDateTime inicioRiegoManual;
 
 volatile int numeroDePulsos;
 
@@ -26,6 +27,9 @@ int fechaEnDiasDesdeEl2000 = 0;
 
 int minutoActual = 0;
 int horaActual = 0;
+bool senialActual = LOW;
+bool senialAntigua = LOW;
+int estadoDeSwitch = 0;
 
 void setup ()
 {
@@ -62,7 +66,7 @@ void setup ()
 
 void loop ()
 {
-   solicitudDeRiegoManual = digitalRead(pinSolicitudDeRiegoManual);
+   solicitudDeRiegoManual = ordenDeRiegoManual();
    solicitudDeRiegoProgramado = esHoraDeRiego();
         
     if (solicitudDeRiegoManual || solicitudDeRiegoProgramado){
@@ -174,6 +178,42 @@ bool esCorruptoElPuntero(){
   }
 
 
+//---Funcion de orden de riego por flanco de subida de switch-------------------------------------
+
+bool ordenDeRiegoManual(){
+  now = Rtc.GetDateTime();
+
+  switch (estadoDeSwitch){
+    case 0:
+      if (!digitalRead(pinSolicitudDeRiegoManual)){
+        inicioRiegoManual = Rtc.GetDateTime();
+        estadoDeSwitch = 1;
+        return true;
+      }
+      return false;
+    case 1:
+      if (!!digitalRead(pinSolicitudDeRiegoManual)){
+        estadoDeSwitch = 2;
+        }         
+       return true;
+    case 2:
+      if (((now.Minute() - inicioRiegoManual.Minute()) >= 2) or !digitalRead(pinSolicitudDeRiegoManual)){
+        estadoDeSwitch = 3;
+        return false;
+          }
+      return true;
+    case 3:
+    if (!!digitalRead(pinSolicitudDeRiegoManual)){
+        estadoDeSwitch = 0;
+        }         
+       return false;
+    default:
+      estadoDeSwitch = 0;
+      return false; 
+    }
+}
+
+
 //---Función para determinar si es es hora de activar la bomba------------------------------------
 
 bool esHoraDeRiego(){
@@ -181,7 +221,7 @@ bool esHoraDeRiego(){
     minutoActual = now.Minute(); 
     horaActual = now.Hour();
 
-    return ((horaActual == 12 && minutoActual >= 3 && minutoActual < 5) ||
+    return ((horaActual == 7 && minutoActual >= 0 && minutoActual < 4) ||
            (horaActual == 13 && minutoActual >= 0 && minutoActual < 4) ||
            (horaActual == 21 && minutoActual >= 0 && minutoActual < 4));
   }
