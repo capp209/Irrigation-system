@@ -5,187 +5,213 @@ ThreeWire myWire(4,5,3); // IO, SCLK, CE
 
 RtcDS1302<ThreeWire> Rtc(myWire);
 RtcDateTime now;
-volatile int NumPulsos; //variable para la cantidad de pulsos recibidos
 
-float factor_conversion=0.5; //para convertir de frecuencia a caudal
+volatile int numeroDePulsos;
 
-int long pulsos_totales = 0;
+float pulsosAVolumen = 1;
 
-int PinSensor = 2;    //Sensor conectado en el pin 2
-const int ledPin = 13;  
-const int pinRiegoManual = 7;  
-const byte posicionMemoriaPuntero0 = 0;
+int pinCondensadorDeFlusho = 2;  
+const int pinBomba = 13;  
+const int pinSolicitudDeRiegoManual = 7; 
+ 
+const byte posicionMemoriaPuntero = 0;
 const byte posicionMemoriaFecha = 2;
 
-bool ordenRTC = false;
-bool bandera = false;
+bool solicitudDeRiegoManual = false;
+bool solicitudDeRiegoProgramado = false;
+bool riego = false;
+
 int puntero = 4;
-int fechaEnDias = 0;
+int fechaEnDiasDesdeEl2000 = 0;
+
+int minutoActual = 0;
+int horaActual = 0;
 
 void setup ()
 {
-    pinMode(pinRiegoManual,INPUT);
-    pinMode(ledPin, OUTPUT); 
-    pinMode(PinSensor, INPUT); 
-    attachInterrupt(0,ContarPulsos,RISING); //(Interrupcion 0(Pin2),funcion,Flanco de subida)
+    numeroDePulsos = 0;
+    pinMode(pinSolicitudDeRiegoManual,INPUT);
+    pinMode(pinBomba, OUTPUT); 
+    pinMode(pinCondensadorDeFlusho, INPUT); 
+    attachInterrupt(digitalPinToInterrupt(pinCondensadorDeFlusho),contarPulsos,RISING); //(Interrupcion 0(Pin2),funcion,Flanco de subida)
  
     Serial.begin(9600);
 
-    Serial.print("compiled: ");
-    Serial.print(__DATE__);
-    Serial.println(__TIME__);
+    Serial.println(" Fecha de fundacion: ");
+    printDateTime(RtcDateTime(__DATE__,__TIME__));
+    Serial.println();
 
     Rtc.Begin();
 
-    RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
-    Rtc.SetDateTime(compiled);
-    printDateTime(compiled);
-    
+    RtcDateTime horaDeCompilacion = RtcDateTime(__DATE__,__TIME__);
+    Rtc.SetDateTime(horaDeCompilacion);
     Serial.println();
-    
-    RtcDateTime now = Rtc.GetDateTime();
 
-    int fechaEnDias0 = EEPROM.read(posicionMemoriaFecha);
-    int fechaEnDias1 = EEPROM.read(posicionMemoriaFecha + 1);
-    fechaEnDias = fechaEnDias0 * 255 + fechaEnDias1;
-
-    int puntero0 = EEPROM.read(posicionMemoriaPuntero0);
-    int puntero1 = EEPROM.read(posicionMemoriaPuntero0 + 1);
-    puntero = puntero0 * 255 + puntero1;
+    if (esCorruptoElPuntero()){
+      inicializarPuntero();
+      }
 
     if (esCorruptaLaFecha()) {
-       EEPROM.write(posicionMemoriaFecha, int(now.TotalDays()/255));
-       EEPROM.write(posicionMemoriaFecha + 1, int(now.TotalDays()%255));
-       fechaEnDias = now.TotalDays();
+      inicializarFecha();
     }
-    Serial.print(fechaEnDias);
+
+    Serial.print("Fecha del reloj en dias desde el 2000: ");
+    Serial.println(fechaEnDiasDesdeEl2000);
+    
 }
 
 void loop ()
 {
-   now = Rtc.GetDateTime();  // Obtener la fecha y hora actual del RTC
-
-    int currentMinute = now.Minute();  // Obtener el minuto actual
-
-    int currentHour = now.Hour();  // Obtener la hora actual
-
-    
-    bool swichState = digitalRead(pinRiegoManual);
-    
-     if ((currentHour == 13 && currentMinute >= 0 && currentMinute < 4) ||
-     (currentHour == 13 && currentMinute >= 0 && currentMinute < 4) ||
-     (currentHour == 21 && currentMinute >= 1 && currentMinute < 4))
-     {
-      ordenRTC = true;
+   solicitudDeRiegoManual = digitalRead(pinSolicitudDeRiegoManual);
+   solicitudDeRiegoProgramado = esHoraDeRiego();
+        
+    if (solicitudDeRiegoManual || solicitudDeRiegoProgramado){
+      digitalWrite(pinBomba, HIGH);
+      riego = true;
       }
       else{
-        ordenRTC = false;
-        }
-      
-    if (swichState || ordenRTC){
-      digitalWrite(ledPin, HIGH);  // Encender el LED durante el riego
-      bandera = true;
-      }
-      else{
-      digitalWrite(ledPin, LOW);  // Encender el LED durante el riego
-      if (bandera == true) {
-         writeEEPROM();
-         bandera = false;
+      digitalWrite(pinBomba, LOW);
+      if (riego == true) {
+         riego = false;
+         registrarEnMemoria();
+         Serial.print("Ultimo puntero escrito: ");
+         Serial.println(puntero);
+         Serial.print("la cantidad en litros fue: ");
+         Serial.println(EEPROM.read(puntero+2));
         }
        
       }
-      float frecuencia=ObtenerVolumen(); //obtenemos la Frecuencia de los pulsos en Hz
-      float caudal_L_m=frecuencia/factor_conversion; //calculamos el caudal en L/m
-      float caudal_L_h=caudal_L_m*60; //calculamos el caudal en L/h
-//-----Enviamos por el puerto serie---------------
-      Serial.print ("FrecuenciaPulsos: "); 
-      Serial.print (frecuencia,0); 
-      Serial.print ("Hz\tCaudal: "); 
-      Serial.print (caudal_L_m,3); 
-      Serial.print (" L/m\t"); 
-      Serial.print (caudal_L_h,3); 
-      Serial.println ("L/h"); 
-      Serial.print (pulsos_totales); 
-      Serial.println ("pulsos"); 
-      
-      pulsos_totales += NumPulsos;
-
-      Serial.print (puntero); 
-      Serial.println ("puntero"); 
-          
-   /* printDateTime(now);
-    
-    Serial.println();
-
-    if (!now.IsValid()){
-      
-        Serial.println("RTC lost confidence in the DateTime!");
-        }
-    */
     
  }
 
+
+//---Función para obtener los pulsos--------------------------------------------------------
+
+void contarPulsos ()
+{ 
+  numeroDePulsos++;
+} 
+
+
+//---Función para calcular el dia a escribir en registro--------------------------------------
+
+int diaDesdeLaFundacion(){
+  return (now.TotalDays() - fechaEnDiasDesdeEl2000);
+  }
+
+
+//---Función para obtener el conteo en multiplos de 10 minutos de la hora actual--------------
+
+int decaminutoDelDia(){
+  return int((now.Hour()*60+now.Minute())/10);
+  }
+
+
+//---Función para obtener el volumen escrito en pares de litros--------------------------------
+  
+int duoLitros(){
+  return int(numeroDePulsos * pulsosAVolumen / 2);
+  }
+
+
+//---Función encargada de registrar en memoria cada evento de riego-----------------------------
+
+void registrarEnMemoria(){
+  puntero = obtenerPuntero();
+  EEPROM.write(puntero,diaDesdeLaFundacion());
+  
+  EEPROM.write(puntero + 1, decaminutoDelDia());
+  
+  EEPROM.write(puntero + 2,duoLitros());
+  
+  EEPROM.write(posicionMemoriaPuntero, int((puntero+3) / 255));
+  EEPROM.write(posicionMemoriaPuntero +1, int((puntero+3) % 255));
+  
+  borrarContadorDePulsos();
+  }
+
+
+//---Función para reiniciar la cuenta de los pulsos---------------------------------------------
+
+void borrarContadorDePulsos(){
+  numeroDePulsos = 0;
+  }
+
+
+//---Función para inicializar el puntero en la posicion de inicio de escritura de datos---------
+  
+void inicializarPuntero(){
+      EEPROM.write(posicionMemoriaPuntero,0);
+      EEPROM.write(posicionMemoriaPuntero + 1,4);
+  }
+
+
+//---Función para escribir la fecha de fundacion en la poscicion de memoria ---------------------
+  
+void inicializarFecha(){
+      now = Rtc.GetDateTime();
+      EEPROM.write(posicionMemoriaFecha, int(now.TotalDays()/255));
+      EEPROM.write(posicionMemoriaFecha + 1, int(now.TotalDays()%255));
+      fechaEnDiasDesdeEl2000 = now.TotalDays();
+  }
+
+
+//---Función para comprobar la validez de la fecha--------------------------------------------
+
+bool esCorruptaLaFecha(){
+  
+  fechaEnDiasDesdeEl2000 = int(EEPROM.read(posicionMemoriaFecha) * 255 + EEPROM.read(posicionMemoriaFecha + 1));
+
+  return !(fechaEnDiasDesdeEl2000 > 22*365 and fechaEnDiasDesdeEl2000 < 32*365);
+  }
+
+
+//---Función para comprobar la validez del puntero-----------------------------------------------
+  
+bool esCorruptoElPuntero(){
+  puntero = obtenerPuntero();
+  return (!(puntero > 4 and puntero < 1024));
+  }
+
+
+//---Función para determinar si es es hora de activar la bomba------------------------------------
+
+bool esHoraDeRiego(){
+    now = Rtc.GetDateTime();
+    minutoActual = now.Minute(); 
+    horaActual = now.Hour();
+
+    return ((horaActual == 12 && minutoActual >= 3 && minutoActual < 5) ||
+           (horaActual == 13 && minutoActual >= 0 && minutoActual < 4) ||
+           (horaActual == 21 && minutoActual >= 0 && minutoActual < 4));
+  }
+
+
+//---Función para obtener el valor del puntero----------------------------------------------------
+  
+int obtenerPuntero(){
+  return (EEPROM.read(posicionMemoriaPuntero) * 255 + EEPROM.read(posicionMemoriaPuntero + 1));
+  }
+  
+//---macro para el calculo del tamaño de un arreglo-----------------------------------------------
 #define countof(a) (sizeof(a) / sizeof(a[0]))
 
-void printDateTime(const RtcDateTime& dt)
+
+//---Función para imprimir la variable de tipo Rtc de la forma correcta---------------------------
+
+void printDateTime(const RtcDateTime dt)
 {
   
     char datestring[26];
 
     snprintf_P(datestring, 
             countof(datestring),
-            PSTR("%02u/%02u/%04u %02u:%02u:%02u"),
+            PSTR("%02u/%02u/%04u  %02u:%02u:%02u"),
             dt.Month(),
             dt.Day(),
             dt.Year(),
             dt.Hour(),
             dt.Minute(),
             dt.Second() );
-    Serial.print(datestring);
+    Serial.println(datestring);
 }
-
-
-void ContarPulsos ()
-{ 
-  NumPulsos++;  //incrementamos la variable de pulsos
-} 
-
-
-//---Función para obtener frecuencia de los pulsos--------
-int ObtenerVolumen() 
-{
-  int frecuencia;
-  NumPulsos = 0;   //Ponemos a 0 el número de pulsos
-  interrupts();    //Habilitamos las interrupciones
-  delay(1000);   //muestra de 1 segundo
-  noInterrupts(); //Desabilitamos las interrupciones
-  frecuencia = NumPulsos; //Hz(pulsos por segundo)
-  return frecuencia;
-}
-
-bool esCorruptaLaFecha(){
-  return !(fechaEnDias > 22*365 and fechaEnDias < 32*365);
-  }
-
-int formatDay(){
-  return (now.TotalDays() - fechaEnDias);
-  }
-  
-int formatHour(){
-  return int((now.Hour()*60+now.Minute())/10);
-  }
-  
-int formatVolume(){
-  return int(NumPulsos * factor_conversion);
-  }
-
-void writeEEPROM(){
-  int puntero0 = EEPROM.read(posicionMemoriaPuntero0);
-  int puntero1 = EEPROM.read(posicionMemoriaPuntero0 + 1);
-  puntero = puntero0 * 255 + puntero1;
-  EEPROM.write(puntero,formatDay());
-  EEPROM.write(puntero + 1, formatHour());
-  EEPROM.write(puntero + 2,formatVolume());
-  EEPROM.write(posicionMemoriaPuntero0, int((puntero+3) / 255));
-  EEPROM.write(posicionMemoriaPuntero0 +1, int((puntero+3) % 255));
-  }
