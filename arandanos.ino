@@ -9,7 +9,7 @@ RtcDateTime inicioRiegoManual;
 
 volatile int numeroDePulsos;
 
-float pulsosAVolumen = 1;
+float pulsosAVolumen = 0.074;
 
 int pinCondensadorDeFlusho = 2;  
 const int pinBomba = 13;  
